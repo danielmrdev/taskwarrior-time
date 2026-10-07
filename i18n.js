@@ -427,7 +427,7 @@ function t(key, localeName, uiLanguage) {
     addDep: "Añadir dependencia",
     noDepCandidates: "No hay otras tareas para vincular",
     removeDep: "Quitar",
-    datesHint: "hoy, mañana, DD.MM.AAAA[ HH:MM:SS]",
+    datesHint: "today, tomorrow, DD.MM.AAAA[ HH:MM:SS]",
     dateApply: "Aplicar",
     dateTime: "Hora",
     dateClear: "Borrar",
