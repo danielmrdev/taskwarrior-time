@@ -1,16 +1,14 @@
-# Taskwarrior Time
+# Omarchy Taskwarrior
 
-**English** · [Русский](README.ru.md)
+**Omarchy Taskwarrior** is an [Omarchy](https://omarchy.org/) bar widget that brings **Taskwarrior** and **Timewarrior** into the shell panel. Create, edit, filter, and time-track tasks without leaving the desktop.
 
-**Taskwarrior Time** is an [Omarchy](https://omarchy.org/) bar widget that brings **Taskwarrior** and **Timewarrior** into the shell panel. Create, edit, filter, and time-track tasks without leaving the desktop.
+Marketplace: [plugins.omarchy.org/plugin.html?id=omarchy-taskwarrior](https://plugins.omarchy.org/plugin.html?id=omarchy-taskwarrior)
 
-Marketplace: [plugins.omarchy.org/plugin.html?id=taskwarrior-time](https://plugins.omarchy.org/plugin.html?id=taskwarrior-time)
-
-![Taskwarrior Time panel](docs/screenshots/en/00-hero.png)
+![Omarchy Taskwarrior panel](docs/screenshots/en/00-hero.png)
 
 ## What this is
 
-**Taskwarrior Time** (plugin id `taskwarrior-time`) is a **GUI companion** for the classic CLI task stack — not a separate task database.
+**Omarchy Taskwarrior** (plugin id `omarchy-taskwarrior`) is a **GUI companion** for the classic CLI task stack — not a separate task database.
 
 | Component | Role |
 | --- | --- |
@@ -30,7 +28,7 @@ Anything you do here is stored in your normal Taskwarrior / Timewarrior data. Yo
 - **Unsaved changes** dialog when closing a dirty editor (Save / Keep editing / Discard)
 - Uniform **hotkeys**: `Ctrl+Enter` commit, `Esc` cancel, `Ctrl+Delete` destroy
 - **Configurable Hyprland shortcut** to open the new-task composer
-- **i18n**: English, Russian, and Spanish UI (system language, or pick one in About)
+- **i18n**: English and Spanish UI (system language, or pick one in About)
 - **About** tab with version, developer info, What’s new / Marketplace / Report a problem / GitHub, language switch, and debug logging
 
 ### Task list
@@ -84,13 +82,13 @@ The plugin does not install system packages itself. On Arch Linux the package na
 Preferred — Omarchy clones and enables the plugin for you:
 
 ```bash
-omarchy plugin add https://github.com/DataArchitectPro/taskwarrior-time.git --enable --yes
+omarchy plugin add https://github.com/danielmrdev/taskwarrior-time.git --enable --yes
 ```
 
 Then place the widget on the bar if it is not already there (the installer may ask for a section), or add it manually:
 
 ```bash
-omarchy bar move taskwarrior-time --section right
+omarchy bar move omarchy-taskwarrior --section right
 ```
 
 Reload the shell if the icon does not appear:
@@ -101,27 +99,29 @@ omarchy restart shell
 
 ### Developer checkout
 
-For local development, place or clone this repository at `~/.config/omarchy/plugins/taskwarrior-time`, then:
+For local development, place or clone this repository at `~/.config/omarchy/plugins/omarchy-taskwarrior`, then:
 
 ```bash
-omarchy plugin enable taskwarrior-time --section right
+omarchy plugin enable omarchy-taskwarrior --section right
 omarchy restart shell
 ```
 
-The plugin id is `taskwarrior-time` (folder name under `~/.config/omarchy/plugins/`). The marketplace display name is **Taskwarrior Time**.
+The plugin id is `omarchy-taskwarrior` (folder name under `~/.config/omarchy/plugins/`). The display name is **Omarchy Taskwarrior**.
+
+On first run, this fork copies existing UI settings and extra projects from the previous `taskwarrior-time` locations when the corresponding new files do not exist. Legacy files remain untouched; debug logs are not migrated.
 
 ## Update
 
 If the plugin was installed with `omarchy plugin add` (git remote present):
 
 ```bash
-omarchy plugin update taskwarrior-time --yes
+omarchy plugin update omarchy-taskwarrior --yes
 ```
 
 Or manually:
 
 ```bash
-git -C ~/.config/omarchy/plugins/taskwarrior-time pull --ff-only
+git -C ~/.config/omarchy/plugins/omarchy-taskwarrior pull --ff-only
 omarchy restart shell
 ```
 
@@ -130,14 +130,14 @@ Saved files under `~/.config/omarchy/plugins/` are hot-reloaded by the shell; a 
 ## Uninstall
 
 ```bash
-omarchy plugin remove taskwarrior-time
+omarchy plugin remove omarchy-taskwarrior
 ```
 
-This disables the widget and deletes the git checkout under `~/.config/omarchy/plugins/taskwarrior-time`. Your Taskwarrior / Timewarrior data is not removed.
+This disables the widget and deletes the git checkout under `~/.config/omarchy/plugins/omarchy-taskwarrior`. Your Taskwarrior / Timewarrior data is not removed.
 
 ## Usage
 
-1. Left-click the Taskwarrior Time icon on the bar to open the panel.
+1. Left-click the Omarchy Taskwarrior icon on the bar to open the panel.
 2. Use **Tasks** / **Projects** in the header to switch views.
 3. Expand **Filter** when you need status / project / priority / due / timer / deps or search.
 4. Click a task to expand the editor; **Save**, **Cancel**, or **Delete** at the bottom of the card.
@@ -151,7 +151,7 @@ This disables the widget and deletes the git checkout under `~/.config/omarchy/p
 The plugin exposes a `newTask` action through Quickshell IPC. Omarchy uses Lua for Hyprland bindings; add this to `~/.config/hypr/bindings.lua` (change the key combination if needed):
 
 ```lua
-o.bind("SUPER + SHIFT + T", "New task", "qs ipc --path /usr/share/omarchy/shell call taskwarrior-time newTask")
+o.bind("SUPER + SHIFT + T", "New task", "qs ipc --path /usr/share/omarchy/shell call omarchy-taskwarrior newTask")
 ```
 
 Replace `/usr/share/omarchy/shell` if your Omarchy shell lives elsewhere. Omarchy normally reloads Hyprland config on save; run `hyprctl reload` if needed. The shortcut opens the Tasks view and focuses the new-task title field; it does not create a task until you save one.
@@ -162,7 +162,7 @@ When something misbehaves, turn on debug logging from the **About** tab.
 
 1. Open **About** → enable **Debug log**.
 2. Reproduce the bug once (a fresh session banner is written when logging starts).
-3. Use **Open log folder**, attach `~/.local/share/taskwarrior-time/debug.log` to your issue.
+3. Use **Open log folder**, attach `~/.local/share/omarchy-taskwarrior/debug.log` to your issue.
 4. Optionally **Clear logs** before a clean capture, then toggle logging again.
 
 Each session file starts with a short human-readable banner plus environment facts:
@@ -180,12 +180,12 @@ The log is local only (it is not uploaded). Toggle logging **OFF** when you are 
 
 If you hit a bug, a crash, wrong Taskwarrior/Timewarrior behavior, or a missing feature:
 
-1. Check [existing issues](https://github.com/DataArchitectPro/taskwarrior-time/issues).
-2. Open a [new issue](https://github.com/DataArchitectPro/taskwarrior-time/issues/new) with:
-   - Omarchy / Taskwarrior Time version (see About)
+1. Check [existing issues](https://github.com/danielmrdev/taskwarrior-time/issues).
+2. Open a [new issue](https://github.com/danielmrdev/taskwarrior-time/issues/new) with:
+   - Omarchy / Omarchy Taskwarrior version (see About)
    - Steps to reproduce
    - Expected vs actual behavior
-   - The full `~/.local/share/taskwarrior-time/debug.log` from a session with Debug logging ON (banner includes dependency versions)
+   - The full `~/.local/share/omarchy-taskwarrior/debug.log` from a session with Debug logging ON (banner includes dependency versions)
 
 Please do **not** paste secrets, tokens, or private task content.
 
@@ -206,4 +206,4 @@ From a clone of this repository (Node.js 22+ and Python 3 required for behavior 
 
 ## Author
 
-**DataArchitectPro** — [GitHub repository](https://github.com/DataArchitectPro/taskwarrior-time) · [Omarchy marketplace](https://plugins.omarchy.org/plugin.html?id=taskwarrior-time)
+**Daniel Muñoz** — [GitHub repository](https://github.com/danielmrdev/taskwarrior-time) · [Omarchy marketplace](https://plugins.omarchy.org/plugin.html?id=omarchy-taskwarrior)

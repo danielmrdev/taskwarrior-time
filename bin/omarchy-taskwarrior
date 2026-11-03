@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Taskwarrior Time helper — JSON bridge between Omarchy Quickshell UI and task/timew.
+"""Omarchy Taskwarrior helper — JSON bridge between Omarchy Quickshell UI and task/timew.
 
-Plugin id: taskwarrior-time
+Plugin id: omarchy-taskwarrior
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -276,7 +277,7 @@ def parse_duration_to_seconds(text: str) -> int | None:
     raw = str(text or "").strip().lower().replace(" ", "")
     if not raw:
         return None
-    # Accept Russian unit letters and common English unit words.
+    # Accept common English unit words.
     for src, dst in (
         ("minutes", "m"),
         ("minute", "m"),
@@ -290,9 +291,6 @@ def parse_duration_to_seconds(text: str) -> int | None:
         ("second", "s"),
         ("secs", "s"),
         ("sec", "s"),
-        ("ч", "h"),
-        ("м", "m"),
-        ("с", "s"),
     ):
         raw = raw.replace(src, dst)
 
@@ -563,17 +561,47 @@ def list_projects() -> list[str]:
     return uniq[:MAX_PROJECTS]
 
 
-EXTRA_PROJECTS_PATH = Path.home() / ".local" / "share" / "taskwarrior-time" / "extra-projects.json"
-DATA_DIR = Path.home() / ".local" / "share" / "taskwarrior-time"
+DATA_DIR = Path.home() / ".local" / "share" / "omarchy-taskwarrior"
+EXTRA_PROJECTS_PATH = DATA_DIR / "extra-projects.json"
+LEGACY_DATA_DIR = Path.home() / ".local" / "share" / "taskwarrior-time"
 UI_SETTINGS_PATH = DATA_DIR / "ui-settings.json"
 DEBUG_LOG_PATH = DATA_DIR / "debug.log"
 DEBUG_LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_SCHEMA_VERSION = 1
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-# Legacy path inside the plugin dir triggered Omarchy hot-reload on every write.
+# Old plugin path that may still hold extra-project settings.
 _LEGACY_EXTRA_PROJECTS_PATH = (
     Path.home() / ".config" / "omarchy" / "plugins" / "taskwarrior-time" / "extra-projects.json"
 )
+
+
+def _migrate_legacy_file(target: Path, sources: tuple[Path, ...]) -> None:
+    if target.exists():
+        return
+    for source in sources:
+        temp_path = None
+        try:
+            if not source.is_file():
+                continue
+            with source.open("rb") as legacy_file:
+                with tempfile.NamedTemporaryFile(dir=DATA_DIR, prefix=f".{target.name}.", delete=False) as temp_file:
+                    temp_path = Path(temp_file.name)
+                    shutil.copyfileobj(legacy_file, temp_file)
+                    os.fchmod(temp_file.fileno(), 0o600)
+            # Publish complete data atomically without replacing concurrent updates.
+            try:
+                os.link(temp_path, target)
+            except FileExistsError:
+                pass
+            return
+        except OSError:
+            pass
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
 
 def ensure_data_dir() -> None:
@@ -584,6 +612,12 @@ def ensure_data_dir() -> None:
             DATA_DIR.chmod(0o700)
     except OSError:
         pass
+    legacy_files = (
+        (UI_SETTINGS_PATH, (LEGACY_DATA_DIR / "ui-settings.json",)),
+        (EXTRA_PROJECTS_PATH, (LEGACY_DATA_DIR / "extra-projects.json", _LEGACY_EXTRA_PROJECTS_PATH)),
+    )
+    for target, sources in legacy_files:
+        _migrate_legacy_file(target, sources)
 
 
 def _ensure_private_file(path: Path) -> None:
@@ -618,7 +652,7 @@ def _write_private_text(path: Path, text: str) -> None:
 
 def _normalize_ui_language(value: Any) -> str:
     lang = str(value or "system").strip().lower()
-    if lang in ("system", "ru", "en", "es"):
+    if lang in ("system", "en", "es"):
         return lang
     return "system"
 
@@ -689,11 +723,11 @@ def collect_env_fingerprint() -> dict[str, Any]:
         or ""
     )
     return {
-        "pluginId": clip_str(manifest.get("id") or "taskwarrior-time", 64),
+        "pluginId": clip_str(manifest.get("id") or "omarchy-taskwarrior", 64),
         "pluginVersion": clip_str(manifest.get("version") or "unknown", 32),
         "pluginName": clip_str(manifest.get("name") or "Taskwarrior Time", 64),
         "manifestSchema": int(manifest.get("schemaVersion") or 0),
-        "helper": "bin/taskwarrior-time",
+        "helper": "bin/omarchy-taskwarrior",
         "logSchema": LOG_SCHEMA_VERSION,
         "python": clip_str(sys.version.split()[0], 32),
         "platform": clip_str(sys.platform, 32),
@@ -977,14 +1011,9 @@ def cmd_debug_log_clear(_: argparse.Namespace) -> int:
 
 
 def load_extra_projects() -> list[str]:
-    path = EXTRA_PROJECTS_PATH
-    if not path.is_file() and _LEGACY_EXTRA_PROJECTS_PATH.is_file():
-        try:
-            path = _LEGACY_EXTRA_PROJECTS_PATH
-        except OSError:
-            path = EXTRA_PROJECTS_PATH
+    ensure_data_dir()
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = EXTRA_PROJECTS_PATH.read_text(encoding="utf-8")
         data = json.loads(raw)
     except (OSError, json.JSONDecodeError, TypeError):
         return []
@@ -1008,12 +1037,6 @@ def save_extra_projects(names: list[str]) -> None:
         EXTRA_PROJECTS_PATH,
         json.dumps(sorted(cleaned, key=str.casefold), ensure_ascii=False, indent=2) + "\n",
     )
-    # Remove legacy file so the plugin watcher stops spuriously reloading.
-    try:
-        if _LEGACY_EXTRA_PROJECTS_PATH.is_file():
-            _LEGACY_EXTRA_PROJECTS_PATH.unlink()
-    except OSError:
-        pass
 
 
 def all_projects() -> list[str]:
@@ -1685,7 +1708,7 @@ def cmd_time(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="taskwarrior-time")
+    parser = argparse.ArgumentParser(prog="omarchy-taskwarrior")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("export")
@@ -1758,8 +1781,8 @@ def main() -> int:
     p_ss.add_argument(
         "--ui-language",
         default=None,
-        choices=["system", "ru", "en", "es"],
-        help="UI language: system, ru, en, or es",
+        choices=["system", "en", "es"],
+        help="UI language: system, en, or es",
     )
 
     p_dl = sub.add_parser("debug-log")

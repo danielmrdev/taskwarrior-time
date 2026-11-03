@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "taskwarrior-time",
-  "name": "Taskwarrior Time",
+  "id": "omarchy-taskwarrior",
+  "name": "Omarchy Taskwarrior",
   "version": "1.0.2",
-  "author": "DataArchitectPro",
+  "author": "Daniel Muñoz",
   "license": "MIT",
   "description": "Taskwarrior + Timewarrior panel: list, CRUD, projects, deps, timers",
   "kinds": [
@@ -13,7 +13,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Taskwarrior Time",
+    "displayName": "Omarchy Taskwarrior",
     "description": "Taskwarrior + Timewarrior companion for the Omarchy bar",
     "category": "Productivity",
     "allowMultiple": false,
@@ -23,7 +23,7 @@
         "key": "showWhenEmpty",
         "type": "boolean",
         "label": "Show when empty",
-        "description": "Keep the Taskwarrior Time icon visible when there are no pending tasks",
+        "description": "Keep the Omarchy Taskwarrior icon visible when there are no pending tasks",
         "defaultValue": true
       },
       {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local + CI checks for Taskwarrior Time (Omarchy plugin).
+# Local + CI checks for Omarchy Taskwarrior.
 # - manifest validate (omarchy plugin validate, or portable fallback)
 # - qmllint on plugin QML (requires qmllint + Omarchy shell import path)
 

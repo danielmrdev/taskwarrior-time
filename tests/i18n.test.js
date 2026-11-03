@@ -37,7 +37,12 @@ test("preferred English UI language beats Spanish formatting locale", () => {
   assert.equal(systemTranslate("addSection", "en-US", "system"), "New task");
 });
 
-test("English and Russian overrides remain available", () => {
+test("English and Spanish overrides remain available", () => {
   assert.equal(translate("addSection", "es-ES", "en"), "New task");
-  assert.equal(translate("addSection", "es-ES", "ru"), "Новая задача");
+  assert.equal(translate("addSection", "en-US", "es"), "Nueva tarea");
+});
+
+test("unsupported Russian system locale falls back to English", () => {
+  const russianTranslate = createTranslator({ name: "ru_RU", uiLanguages: ["ru-RU"] });
+  assert.equal(russianTranslate("addSection", "ru_RU", "system"), "New task");
 });

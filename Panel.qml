@@ -11,8 +11,8 @@ import "i18n.js" as I18n
 
 Panel {
   id: root
-  moduleName: "taskwarrior-time"
-  ipcTarget: "taskwarrior-time"
+  moduleName: "omarchy-taskwarrior"
+  ipcTarget: "omarchy-taskwarrior"
   manageIpc: false
 
   property var anchorItem: null
@@ -66,14 +66,14 @@ Panel {
   property bool debugLogging: false
   property string debugLogPath: ""
   property string debugSessionId: ""
-  property string uiLanguage: "system" // system | ru | en | es
+  property string uiLanguage: "system" // system | en | es
   property var _logQueue: []
   property bool _logFlushScheduled: false
   readonly property string pluginVersion: "1.0.2"
-  readonly property string githubUrl: "https://github.com/DataArchitectPro/taskwarrior-time"
-  readonly property string changelogUrl: "https://github.com/DataArchitectPro/taskwarrior-time/blob/master/CHANGELOG.md"
-  readonly property string newIssueUrl: "https://github.com/DataArchitectPro/taskwarrior-time/issues/new"
-  readonly property string marketplaceUrl: "https://plugins.omarchy.org/plugin.html?id=taskwarrior-time"
+  readonly property string githubUrl: "https://github.com/danielmrdev/taskwarrior-time"
+  readonly property string changelogUrl: "https://github.com/danielmrdev/taskwarrior-time/blob/main/CHANGELOG.md"
+  readonly property string newIssueUrl: "https://github.com/danielmrdev/taskwarrior-time/issues/new"
+  readonly property string marketplaceUrl: "https://plugins.omarchy.org/plugin.html?id=omarchy-taskwarrior"
 
   readonly property bool editDirty: {
     // Touch every draft field so the binding re-evaluates on edits.
@@ -758,18 +758,11 @@ Panel {
   }
   function tr(key) { return I18n.t(key, root.localeName, root.uiLanguage) }
 
-  readonly property bool uiRussian: {
-    if (root.uiLanguage === "ru") return true
-    if (root.uiLanguage === "en") return false
-    var loc = String(root.localeName || "").toLowerCase().replace(/-/g, "_")
-    var lang = loc.split(".")[0].split("_")[0]
-    return lang === "ru"
-  }
   // Prefer i18n; if a stale module still returns an old title, override.
   readonly property string tasksHeaderTitle: {
     var s = root.tr("titleInProgress")
-    if (s === "titleInProgress" || s === "Tasks in progress" || s === "Задачи в работе" || s === "Tasks")
-      return "Taskwarrior Time"
+    if (s === "titleInProgress" || s === "Tasks in progress" || s === "Tasks")
+      return "Omarchy Taskwarrior"
     return s
   }
 
@@ -779,7 +772,7 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property string helperPath: {
-    var value = String(Qt.resolvedUrl("bin/taskwarrior-time"))
+    var value = String(Qt.resolvedUrl("bin/omarchy-taskwarrior"))
     if (value.indexOf("file://") === 0) return decodeURIComponent(value.substring(7))
     return value
   }
@@ -986,7 +979,7 @@ Panel {
       root._preserveContentY = -1
       root.lastError = String(e)
       root.dlog("snapshot.error", { error: String(e), pluginVersion: root.pluginVersion }, "error")
-      console.warn("taskwarrior-time: bad JSON", e)
+      console.warn("omarchy-taskwarrior: bad JSON", e)
     }
   }
 
@@ -1100,7 +1093,7 @@ Panel {
     }
     var home = ""
     try { home = String(Quickshell.env("HOME") || "") } catch (e) { home = "" }
-    return (home || ".") + "/.local/share/taskwarrior-time"
+    return (home || ".") + "/.local/share/omarchy-taskwarrior"
   }
 
   function openDebugLogFolder() {
@@ -1110,7 +1103,7 @@ Panel {
     Quickshell.execDetached([
       "bash", "-lc",
       'mkdir -p -- "$1" && exec setsid uwsm-app -- nautilus --new-window "$1"',
-      "taskwarrior-time-open-log-dir",
+      "omarchy-taskwarrior-open-log-dir",
       dir
     ])
   }
@@ -1121,7 +1114,7 @@ Panel {
 
   function setUiLanguage(lang) {
     var next = String(lang || "system")
-    if (next !== "system" && next !== "ru" && next !== "en" && next !== "es")
+    if (next !== "system" && next !== "en" && next !== "es")
       next = "system"
     root.uiLanguage = next
     settingsSetProc.command = [
@@ -1566,7 +1559,7 @@ Panel {
           root.debugLogging = !!data.debugLogging
           root.debugLogPath = String(data.logPath || "")
           root.debugSessionId = String(data.sessionId || "")
-          if (data.uiLanguage === "ru" || data.uiLanguage === "en" || data.uiLanguage === "es" || data.uiLanguage === "system")
+          if (data.uiLanguage === "en" || data.uiLanguage === "es" || data.uiLanguage === "system")
             root.uiLanguage = String(data.uiLanguage)
           if (root.debugLogging)
             root.dlog("ui.settings.loaded", {
@@ -1576,7 +1569,7 @@ Panel {
               logPath: root.debugLogPath
             })
         } catch (e) {
-          console.warn("taskwarrior-time: settings-get", e)
+          console.warn("omarchy-taskwarrior: settings-get", e)
           root.dlog("ui.settings.error", { error: String(e), source: "get" }, "error")
         }
       }
@@ -1593,7 +1586,7 @@ Panel {
           root.debugLogging = !!data.debugLogging
           root.debugLogPath = String(data.logPath || "")
           root.debugSessionId = String(data.sessionId || "")
-          if (data.uiLanguage === "ru" || data.uiLanguage === "en" || data.uiLanguage === "es" || data.uiLanguage === "system")
+          if (data.uiLanguage === "en" || data.uiLanguage === "es" || data.uiLanguage === "system")
             root.uiLanguage = String(data.uiLanguage)
           // Banner already written by helper on enable; acknowledge from UI.
           if (root.debugLogging)
@@ -1604,7 +1597,7 @@ Panel {
               logPath: root.debugLogPath
             })
         } catch (e) {
-          console.warn("taskwarrior-time: settings-set", e)
+          console.warn("omarchy-taskwarrior: settings-set", e)
           root.dlog("ui.settings.error", { error: String(e), source: "set" }, "error")
         }
       }
@@ -4237,16 +4230,6 @@ Panel {
                     onClicked: root.setUiLanguage("system")
                   }
                   Button {
-                    text: root.tr("uiLanguageRu")
-                    selected: root.uiLanguage === "ru"
-                    foreground: root.foreground
-                    fontFamily: root.fontFamily
-                    fontSize: Style.font.caption
-                    verticalPadding: Style.space(2)
-                    horizontalPadding: Style.space(8)
-                    onClicked: root.setUiLanguage("ru")
-                  }
-                  Button {
                     text: root.tr("uiLanguageEn")
                     selected: root.uiLanguage === "en"
                     foreground: root.foreground
@@ -4284,7 +4267,7 @@ Panel {
                 Toggle {
                   width: parent.width
                   label: root.debugLogging ? root.tr("debugLogOn") : root.tr("debugLogOff")
-                  description: root.debugLogPath || "~/.local/share/taskwarrior-time/debug.log"
+                  description: root.debugLogPath || "~/.local/share/omarchy-taskwarrior/debug.log"
                   checked: root.debugLogging
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -4524,7 +4507,7 @@ Panel {
   }
 
   IpcHandler {
-    target: "taskwarrior-time"
+    target: "omarchy-taskwarrior"
     function refresh(): void { root.refresh() }
     function open(): void { root.openFromHotkey() }
     function close(): void { root.close() }

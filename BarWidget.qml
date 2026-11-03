@@ -6,7 +6,7 @@ import "i18n.js" as I18n
 
 BarWidget {
   id: root
-  moduleName: "taskwarrior-time"
+  moduleName: "omarchy-taskwarrior"
 
   readonly property bool showWhenEmpty: setting("showWhenEmpty", true) === true
   readonly property int refreshIntervalSec: Math.max(5, Number(setting("refreshIntervalSec", 30)) || 30)
@@ -72,7 +72,7 @@ BarWidget {
       lines.push(root.tr("tooltipIdle"))
 
     if (root.debugLogging)
-      lines.push(root.tr("tooltipDebugOn") + " → " + (root.debugLogPath || "~/.local/share/taskwarrior-time/debug.log"))
+      lines.push(root.tr("tooltipDebugOn") + " → " + (root.debugLogPath || "~/.local/share/omarchy-taskwarrior/debug.log"))
 
     return lines.join("\n")
   }

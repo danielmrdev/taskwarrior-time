@@ -1,4 +1,4 @@
-// Filtering, grouping, and date helpers for Taskwarrior Time (taskwarrior-time).
+// Filtering, grouping, and date helpers for Omarchy Taskwarrior (omarchy-taskwarrior).
 
 function parseTwDate(s) {
   if (!s) return null
