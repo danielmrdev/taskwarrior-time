@@ -30,7 +30,7 @@ Anything you do here is stored in your normal Taskwarrior / Timewarrior data. Yo
 - **Unsaved changes** dialog when closing a dirty editor (Save / Keep editing / Discard)
 - Uniform **hotkeys**: `Ctrl+Enter` commit, `Esc` cancel, `Ctrl+Delete` destroy
 - **Configurable Hyprland shortcut** to open the new-task composer
-- **i18n**: English and Russian UI (system language, or pick one in About)
+- **i18n**: English, Russian, and Spanish UI (system language, or pick one in About)
 - **About** tab with version, developer info, What’s new / Marketplace / Report a problem / GitHub, language switch, and debug logging
 
 ### Task list
@@ -191,7 +191,7 @@ Please do **not** paste secrets, tokens, or private task content.
 
 ## Development checks
 
-From a clone of this repository (Node.js 22+ required for behavior tests):
+From a clone of this repository (Node.js 22+ and Python 3 required for behavior tests):
 
 ```bash
 ./scripts/enable-git-hooks   # once per clone — enables pre-push checks
