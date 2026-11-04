@@ -243,6 +243,7 @@ function groupLabel(key, groupBy, tFn) {
     if (key === "pending") return tFn("statusPending")
     if (key === "completed") return tFn("statusCompleted")
     if (key === "waiting") return tFn("statusWaiting")
+    if (key === "recurring") return tFn("statusRecurring")
     return key || tFn("sectionNone")
   }
   if (groupBy === "due") {
@@ -268,7 +269,7 @@ function priorityOrder(key) {
 
 // Waiting → in progress → done (matches the editor chip order).
 function statusGroupOrder(key) {
-  var order = { waiting: 0, pending: 1, completed: 2 }
+  var order = { waiting: 0, pending: 1, recurring: 2, completed: 3 }
   return order[key] !== undefined ? order[key] : 9
 }
 
@@ -352,7 +353,8 @@ var TASK_FIELDS = [
   "id", "uuid", "description", "status", "project", "priority",
   "scheduled", "due", "wait", "waitingFor", "outcome", "details", "start", "end",
   "depends", "blocks", "urgency", "tags", "timerActive", "todaySeconds",
-  "todayLabel", "overdue", "blocked", "blocking"
+  "todayLabel", "overdue", "blocked", "blocking",
+  "recurrence", "parentUuid", "isRecurringTemplate"
 ]
 
 function toJsArray(v) {

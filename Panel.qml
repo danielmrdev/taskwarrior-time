@@ -36,6 +36,7 @@ Panel {
   property string groupBy: setting("defaultGroupBy", "project")
   property string expandedUuid: ""
   property string pendingDeleteUuid: ""
+  property string pendingStopSeriesUuid: ""
   property string pendingClearProject: ""
   property string projectFilter: ""
   property int cursorIndex: -1
@@ -58,12 +59,15 @@ Panel {
   property string editProject: ""
   property string editScheduled: ""
   property string editDue: ""
+  property string editRecurrence: ""
   property bool editActive: false
   property string editBaselineJson: ""
   property var pendingEditorClose: null
   property string pendingEditorReseedUuid: ""
   property var _cmdQueue: []
   property bool debugLogging: false
+  property bool settingsReady: false
+  property var _notificationQueue: []
   property string debugLogPath: ""
   property string debugSessionId: ""
   property string uiLanguage: "system" // system | en | es
@@ -79,7 +83,7 @@ Panel {
     // Touch every draft field so the binding re-evaluates on edits.
     var _ = root.editDescription + "\n" + root.editDetails + "\n" + root.editWaitingFor
       + "\n" + root.editOutcome + "\n" + root.editPriority + "\n" + root.editProject
-      + "\n" + root.editScheduled + "\n" + root.editDue
+      + "\n" + root.editScheduled + "\n" + root.editDue + "\n" + root.editRecurrence
     if (!root.editActive || !root.editBaselineJson) return false
     return JSON.stringify(root.editValues()) !== root.editBaselineJson
   }
@@ -99,6 +103,7 @@ Panel {
     root.editProject = task.project || ""
     root.editScheduled = Model.formatEditableDateTime(task.scheduled)
     root.editDue = Model.formatEditableDateTime(task.due)
+    root.editRecurrence = String(task.recurrence || "")
     root.editActive = true
     root.refreshEditBaseline()
   }
@@ -113,6 +118,7 @@ Panel {
     root.editProject = ""
     root.editScheduled = ""
     root.editDue = ""
+    root.editRecurrence = ""
     root.editActive = false
     root.editBaselineJson = ""
   }
@@ -126,7 +132,8 @@ Panel {
       priority: root.editPriority,
       project: root.editProject,
       scheduled: root.editScheduled,
-      due: root.editDue
+      due: root.editDue,
+      recurrence: root.editRecurrence
     }
   }
 
@@ -139,6 +146,7 @@ Panel {
     root.editProject = values.project || ""
     root.editScheduled = values.scheduled || ""
     root.editDue = values.due || ""
+    root.editRecurrence = values.recurrence || ""
     root.editActive = true
   }
 
@@ -404,6 +412,7 @@ Panel {
   property string addProject: ""
   property string addScheduled: ""
   property string addDue: ""
+  property string addRecurrence: ""
   property string addStatus: "waiting"
   property string addWaitingFor: ""
   property var addDepUuids: []
@@ -531,6 +540,7 @@ Panel {
   function dismissEscapeOverlay() {
     if (confirmUnsaved && confirmUnsaved.opened) return false
     if (confirmDelete && confirmDelete.opened) return false
+    if (confirmStopSeries && confirmStopSeries.opened) return false
     if (confirmClear && confirmClear.opened) return false
 
     function closePicker(field) {
@@ -609,6 +619,7 @@ Panel {
   readonly property bool anyConfirmOpen: !!(
     (confirmUnsaved && confirmUnsaved.opened)
     || (confirmDelete && confirmDelete.opened)
+    || (confirmStopSeries && confirmStopSeries.opened)
     || (confirmClear && confirmClear.opened)
   )
 
@@ -933,6 +944,7 @@ Panel {
         root._preserveContentY = listView.contentY
       root.editGuard = true
       root.snapshot = data
+      root.queueAlertNotifications(data)
       root.lastError = data.error ? String(data.error) : ""
       // Always replace when the list was empty so the first export after
       // startup reliably populates ListView.
@@ -984,22 +996,80 @@ Panel {
   }
 
   function refresh() {
-    // Don't contend with an in-flight mutation for the Taskwarrior lock.
-    if (cmdProc.running || exportProc.running) return
-    exportProc.command = [root.helperPath, "export"]
-    exportProc.running = true
+    // Don't contend with task commands or let pending alerts grow across polls.
+    if (cmdProc.running || refreshProc.running || notificationProc.running
+        || (root._notificationQueue || []).length > 0) return
+    refreshProc.command = [root.helperPath, "refresh"]
+    refreshProc.running = true
+  }
+
+  function queueAlertNotifications(data) {
+    var records = data && Array.isArray(data.notifications) ? data.notifications : []
+    var tasks = data && Array.isArray(data.tasks) ? data.tasks : []
+    for (var i = 0; i < records.length; i++) {
+      var record = records[i] || {}
+      var uuid = String(record.uuid || "")
+      var task = null
+      for (var j = 0; j < tasks.length; j++) {
+        if (String(tasks[j].uuid || "") === uuid) { task = tasks[j]; break }
+      }
+      if (!task || !uuid) continue
+      root._notificationQueue = (root._notificationQueue || []).concat([{
+        description: String(task.description || ""),
+        reasons: Array.isArray(record.reasons) ? record.reasons.slice() : []
+      }])
+    }
+    root.dispatchNextNotification()
+  }
+
+  function safeNotificationText(value) {
+    return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/&/g, "＆").replace(/</g, "‹").replace(/>/g, "›")
+      .replace(/\"/g, "＂").replace(/'/g, "＇").slice(0, 240)
+  }
+
+  function dispatchNextNotification() {
+    if (!root.settingsReady || notificationProc.running) return
+    var queue = root._notificationQueue || []
+    if (!queue.length) return
+    var item = queue[0]
+    root._notificationQueue = queue.slice(1)
+    var reasonKeys = {
+      overdue: "notificationOverdue",
+      upcoming: "notificationUpcoming",
+      newRecurrence: "notificationNewRecurrence"
+    }
+    var localizedReasons = []
+    for (var i = 0; i < item.reasons.length; i++) {
+      var key = reasonKeys[String(item.reasons[i])]
+      if (key) localizedReasons.push(root.tr(key))
+    }
+    var body = localizedReasons.join(" · ")
+    var description = root.safeNotificationText(item.description)
+    if (description) body += (body ? "\n" : "") + description
+    var omarchyPath = String(Quickshell.env("OMARCHY_PATH") || "")
+    if (!omarchyPath || !body) {
+      root.dlog("notification.skip", { hasPath: !!omarchyPath, hasBody: !!body }, "warn")
+      Qt.callLater(root.dispatchNextNotification)
+      return
+    }
+    notificationProc.command = [
+      omarchyPath + "/bin/omarchy-notification-send",
+      "-u", "critical", root.tr("notificationTitle"), body
+    ]
+    notificationProc.running = true
   }
 
   function runCmd(args) {
-    // Serialize against exportProc — Taskwarrior file locks make parallel
+    // Serialize against refreshProc — Taskwarrior file locks make parallel
     // `task` invocations appear to hang for seconds.
-    if (cmdProc.running || exportProc.running) {
+    if (cmdProc.running || refreshProc.running) {
       root._cmdQueue = (root._cmdQueue || []).concat([args])
       root.dlog("cmd.queue", {
         args: root._safeArgs(args),
         queueLen: root._cmdQueue.length,
         cmdRunning: !!cmdProc.running,
-        exportRunning: !!exportProc.running
+        exportRunning: !!refreshProc.running
       })
       return
     }
@@ -1131,7 +1201,7 @@ Panel {
   }
 
   function _drainCmdQueue() {
-    if (cmdProc.running || exportProc.running) return
+    if (cmdProc.running || refreshProc.running) return
     var q = root._cmdQueue
     if (!q || !q.length) return
     var next = q[0]
@@ -1205,7 +1275,7 @@ Panel {
       dep: dep,
       expandedUuid: root.expandedUuid,
       cmdRunning: !!cmdProc.running,
-      exportRunning: !!exportProc.running,
+      exportRunning: !!refreshProc.running,
       queueLen: (root._cmdQueue || []).length
     })
     if (!uuid || !dep || dep === "[object Object]") {
@@ -1228,7 +1298,7 @@ Panel {
       uuid: uuid,
       dep: dep,
       cmdRunning: !!cmdProc.running,
-      exportRunning: !!exportProc.running,
+      exportRunning: !!refreshProc.running,
       queueLen: (root._cmdQueue || []).length
     })
     if (!uuid || !dep || dep === "[object Object]") {
@@ -1247,6 +1317,11 @@ Panel {
     if (!desc) return
     var sched = Model.toWireDateTime(addScheduledField.text.trim())
     var due = Model.toWireDateTime(addDueField.text.trim())
+    var recurrence = String(addRecurrenceField.text || "").trim()
+    if (recurrence && !due) {
+      root.lastError = root.tr("recurrenceDueRequired")
+      return
+    }
     if (!Model.datesValid(sched, due)) {
       root.lastError = "scheduled > due"
       return
@@ -1257,6 +1332,7 @@ Panel {
     if (projectCombo.value) args.push("--project", projectCombo.value)
     if (sched) args.push("--scheduled", sched)
     if (due) args.push("--due", due)
+    if (recurrence) args.push("--recur", recurrence)
     var details = addDetailsField.text
     if (details && details.trim()) args.push("--details", details)
     if (status === "waiting" && addWaitingForField.text.trim())
@@ -1273,6 +1349,7 @@ Panel {
     addField.text = ""
     addScheduledField.text = ""
     addDueField.text = ""
+    addRecurrenceField.text = ""
     addDetailsField.text = ""
     addWaitingForField.text = ""
     addOutcomeField.text = ""
@@ -1308,7 +1385,7 @@ Panel {
   }
 
   function toggleDone(task) {
-    if (!task || !task.uuid) return
+    if (!task || !task.uuid || task.isRecurringTemplate) return
     root.busyUuid = task.uuid
     if (task.status === "completed") {
       root.applyLocalTaskStatus(task.uuid, "pending")
@@ -1324,10 +1401,24 @@ Panel {
   }
 
   function toggleTimer(task) {
-    if (!task || !task.uuid) return
+    if (!task || !task.uuid || task.isRecurringTemplate) return
     root.busyUuid = task.uuid
     if (task.timerActive) runCmd(["stop", "--uuid", task.uuid])
     else runCmd(["start", "--uuid", task.uuid])
+  }
+
+  function requestStopSeries(task) {
+    if (!task || !task.uuid || !(task.isRecurringTemplate || task.recurrence || task.parentUuid)) return
+    root.pendingStopSeriesUuid = String(task.uuid)
+    confirmStopSeries.opened = true
+  }
+
+  function confirmStopSeriesAction() {
+    confirmStopSeries.opened = false
+    if (!root.pendingStopSeriesUuid) return
+    root.busyUuid = root.pendingStopSeriesUuid
+    root.runCmd(["stop-series", "--uuid", root.pendingStopSeriesUuid])
+    root.pendingStopSeriesUuid = ""
   }
 
   function requestDelete(task) {
@@ -1350,6 +1441,15 @@ Panel {
     if (!desc || !String(desc).trim()) return
     var schedWire = Model.toWireDateTime(scheduled === undefined || scheduled === null ? "" : String(scheduled).trim())
     var dueWire = Model.toWireDateTime(due === undefined || due === null ? "" : String(due).trim())
+    var recurrence = String(root.editRecurrence || "").trim()
+    if ((recurrence || task.recurrence) && !dueWire) {
+      root.lastError = recurrence ? root.tr("recurrenceDueRequired") : root.tr("recurrenceClearGuidance")
+      return
+    }
+    if (task.recurrence && !recurrence) {
+      root.lastError = root.tr("recurrenceClearGuidance")
+      return
+    }
     if (!Model.datesValid(schedWire, dueWire)) {
       root.lastError = "scheduled > due"
       return
@@ -1364,6 +1464,7 @@ Panel {
     args.push("--scheduled", schedWire)
     args.push("--due", dueWire)
     args.push("--details", details === undefined || details === null ? "" : String(details))
+    if (recurrence) args.push("--recur", recurrence)
     runCmd(args)
   }
 
@@ -1485,24 +1586,29 @@ Panel {
   }
 
   Process {
-    id: exportProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var bytes = String(text || "").length
-        root.dlog("export.done", { bytes: bytes })
-        if (bytes > root.maxSnapshotChars) {
-          root.lastError = "snapshot exceeds size limit"
-          root.dlog("export.reject", { bytes: bytes, limit: root.maxSnapshotChars }, "error")
-        } else {
-          root.applyData(text)
-        }
-        Qt.callLater(root._drainCmdQueue)
-      }
-    }
+    id: refreshProc
+    stdout: StdioCollector { id: refreshOutput; waitForEnd: true }
     onExited: function(code) {
-      root.dlog("export.exit", { code: code }, code === 0 ? "info" : "warn")
+      var output = String(refreshOutput.text || "")
+      root.dlog("refresh.exit", { code: code, bytes: output.length }, code === 0 ? "info" : "warn")
+      if (code === 0 && output.length <= root.maxSnapshotChars)
+        root.applyData(output)
+      else if (code !== 0)
+        root.lastError = "refresh failed"
+      else
+        root.lastError = "snapshot exceeds size limit"
       Qt.callLater(root._drainCmdQueue)
+    }
+  }
+
+  Process {
+    id: notificationProc
+    stdout: StdioCollector { waitForEnd: true }
+    onExited: function(code) {
+      if (code !== 0)
+        root.dlog("notification.failed", { code: code }, "warn")
+      // State was committed by the helper before planning this event; never retry it.
+      Qt.callLater(root.dispatchNextNotification)
     }
   }
 
@@ -1572,7 +1678,13 @@ Panel {
           console.warn("omarchy-taskwarrior: settings-get", e)
           root.dlog("ui.settings.error", { error: String(e), source: "get" }, "error")
         }
+        root.settingsReady = true
+        root.dispatchNextNotification()
       }
+    }
+    onExited: function() {
+      root.settingsReady = true
+      root.dispatchNextNotification()
     }
   }
 
@@ -2274,6 +2386,7 @@ Panel {
                   var due = editDue.text
                   if (due !== "" || root.editDue === "")
                     root.editDue = due
+                  root.editRecurrence = editRecurrenceField.text
                 }
               }
 
@@ -2321,6 +2434,7 @@ Panel {
                 editProject.value = v.project || ""
                 editScheduled.text = v.scheduled || ""
                 editDue.text = v.due || ""
+                editRecurrenceField.text = v.recurrence || ""
                 suppressDraftPersist = false
                 // Status-gated fields may still be invisible on first hydrate;
                 // re-apply once they show (see onVisibleChanged below).
@@ -2355,6 +2469,7 @@ Panel {
                 else if (key === "project") root.editProject = value
                 else if (key === "scheduled") root.editScheduled = value
                 else if (key === "due") root.editDue = value
+                else if (key === "recurrence") root.editRecurrence = value
               }
 
               function captureEditorValues() {
@@ -2364,7 +2479,8 @@ Panel {
                   project: root.editProject,
                   priority: root.editPriority,
                   scheduled: root.editScheduled,
-                  due: root.editDue
+                  due: root.editDue,
+                  recurrence: root.editRecurrence
                 }
               }
 
@@ -2489,6 +2605,7 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       width: root.doneCheckSize
                       height: root.doneCheckSize
+                      visible: !(rowRoot.task && rowRoot.task.isRecurringTemplate)
 
                       Text {
                         textFormat: Text.PlainText
@@ -2528,6 +2645,7 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       width: root.doneCheckSize
                       height: root.doneCheckSize
+                      visible: !(rowRoot.task && rowRoot.task.isRecurringTemplate)
 
                       readonly property bool running: !!(rowRoot.task && rowRoot.task.timerActive)
 
@@ -2608,6 +2726,16 @@ Panel {
                               }
                             })
                           }
+                        }
+
+                        Text {
+                          visible: !rowRoot.expanded && !!(rowRoot.task && rowRoot.task.isRecurringTemplate)
+                          width: parent.width
+                          text: root.tr("statusRecurring") + (rowRoot.task.recurrence ? " · " + rowRoot.task.recurrence : "")
+                          color: root.dim
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideRight
                         }
 
                         // List meta as fixed columns (scan-stable): project flexes
@@ -2772,6 +2900,7 @@ Panel {
                         font.pixelSize: Style.font.caption
                       }
                       Row {
+                        visible: !(rowRoot.task && rowRoot.task.isRecurringTemplate)
                         spacing: Style.space(4)
                         Button {
                           text: root.tr("waiting")
@@ -3066,6 +3195,15 @@ Panel {
                         Connections {
                           target: editDue
                           function onTextChanged() { rowRoot.setEditField("due", editDue.text) }
+                        }
+                        Text { text: root.tr("recurrence"); color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                        TextField {
+                          id: editRecurrenceField
+                          Layout.fillWidth: true
+                          foreground: root.foreground
+                          placeholderText: root.tr("recurrenceHint")
+                          text: ""
+                          onTextChanged: rowRoot.setEditField("recurrence", text)
                         }
                       }
                     }
@@ -3377,6 +3515,15 @@ Panel {
                         fontFamily: root.fontFamily
                         fontSize: Style.font.caption
                         onClicked: root.requestCloseEditor({ type: "dismiss" })
+                      }
+
+                      Button {
+                        visible: !!(rowRoot.taskSrc && (rowRoot.taskSrc.isRecurringTemplate || rowRoot.taskSrc.recurrence || rowRoot.taskSrc.parentUuid))
+                        text: root.tr("stopSeries")
+                        foreground: root.urgent
+                        fontFamily: root.fontFamily
+                        fontSize: Style.font.caption
+                        onClicked: root.requestStopSeries(rowRoot.taskSrc)
                       }
 
                       Button {
@@ -3792,6 +3939,15 @@ Panel {
                   trApply: root.tr("dateApply")
                   trTime: root.tr("dateTime")
                 }
+              }
+              Text { text: root.tr("recurrence"); color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+              TextField {
+                id: addRecurrenceField
+                width: parent.width
+                foreground: root.foreground
+                placeholderText: root.tr("recurrenceHint")
+                text: root.addRecurrence
+                onTextChanged: root.addRecurrence = text
               }
 
               Text {
@@ -4332,6 +4488,21 @@ Panel {
         fontFamily: root.fontFamily
         onCanceled: { opened = false; root.pendingDeleteUuid = "" }
         onConfirmed: root.confirmDeleteTask()
+      }
+
+      HintConfirmDialog {
+        id: confirmStopSeries
+        anchors.fill: parent
+        message: root.tr("stopSeriesConfirm")
+        cancelText: root.tr("cancel")
+        confirmText: root.tr("stopSeries")
+        cancelHint: "Esc"
+        confirmHint: "Ctrl+Enter"
+        foreground: root.foreground
+        background: Color.popups.background
+        fontFamily: root.fontFamily
+        onCanceled: { opened = false; root.pendingStopSeriesUuid = "" }
+        onConfirmed: root.confirmStopSeriesAction()
       }
 
       HintConfirmDialog {

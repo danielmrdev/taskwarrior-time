@@ -7,6 +7,8 @@ Plugin id: omarchy-taskwarrior
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -20,6 +22,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    from alert_state import STATE_VERSION, reconcile
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from alert_state import STATE_VERSION, reconcile
 
 
 TW_RC = [
@@ -41,6 +49,8 @@ MAX_TAGS_PER_TASK = 40
 MAX_STRING_LEN = 2000
 MAX_SHORT_STRING_LEN = 240
 MAX_PAYLOAD_BYTES = 1_800_000
+MAX_ALERT_STATE_BYTES = 500_000
+ALERT_STATE_RELATIVE_PATH = Path(".local/share/omarchy-taskwarrior/alert-state.json")
 
 
 def which(name: str) -> bool:
@@ -531,15 +541,26 @@ def task_timew_tags(raw: dict[str, Any]) -> list[str]:
     return [t for t in tags if t]
 
 
-def export_tasks() -> tuple[list[dict[str, Any]], str | None]:
+def export_tasks(
+    *, materialize_recurrence: bool = False, require_success: bool = False
+) -> tuple[list[dict[str, Any]], str | None]:
     # Prefer pending + completed (recent) + started; filter deleted out.
-    proc = task_cmd("export")
+    # The normal helper read override disables Taskwarrior GC, which also
+    # suppresses native creation of the first recurring occurrence.
+    if materialize_recurrence:
+        rc = [setting for setting in TW_RC if setting != "rc.gc=0"]
+        proc = run(["task", *rc, "rc.gc=1", "export"])
+    else:
+        proc = task_cmd("export")
     if proc.returncode == 124:
         return [], "task export timed out"
     if proc.returncode == 125:
         return [], "task export output too large"
-    if proc.returncode != 0 and not (proc.stdout or "").strip():
-        return [], None
+    if proc.returncode != 0:
+        if require_success:
+            return [], "task export failed"
+        if not (proc.stdout or "").strip():
+            return [], None
     try:
         data = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError:
@@ -1104,7 +1125,12 @@ def timew_active_and_today() -> tuple[dict[str, Any] | None, dict[str, int], str
     return active, today, None
 
 
-def normalize_task(raw: dict[str, Any], today: dict[str, int], active: dict[str, Any] | None) -> dict[str, Any]:
+def normalize_task(
+    raw: dict[str, Any],
+    today: dict[str, int],
+    active: dict[str, Any] | None,
+    recurrence_by_template: dict[str, str] | None = None,
+) -> dict[str, Any]:
     uuid = clip_str(raw.get("uuid") or "", 64)
     desc = clip_str(raw.get("description") or "", MAX_STRING_LEN)
     project = clip_str(raw.get("project") or "", MAX_SHORT_STRING_LEN)
@@ -1131,6 +1157,13 @@ def normalize_task(raw: dict[str, Any], today: dict[str, int], active: dict[str,
     scheduled = raw.get("scheduled")
     wait = raw.get("wait")
     raw_status = str(raw.get("status") or "")
+    parent_uuid = str(raw.get("parent") or "")
+    recurrence = str(raw.get("recur") or "")
+    if parent_uuid:
+        # Occurrence metadata is authoritative only while its parent is an
+        # active recurring template; Taskwarrior can retain stale raw recur.
+        recurrence = str((recurrence_by_template or {}).get(parent_uuid) or "")
+    is_recurring_template = raw_status == "recurring"
     # TW3 keeps status=pending when wait: is set; surface as "waiting" while wait is future.
     status = raw_status
     if raw_status == "pending" and wait:
@@ -1154,6 +1187,9 @@ def normalize_task(raw: dict[str, Any], today: dict[str, int], active: dict[str,
         "uuid": uuid,
         "description": desc,
         "status": clip_str(status, 32),
+        "recurrence": clip_str(recurrence, 32) if recurrence else "",
+        "parentUuid": clip_str(parent_uuid, 64),
+        "isRecurringTemplate": is_recurring_template,
         "project": project,
         "priority": clip_str(raw.get("priority") or "", 8),
         "scheduled": clip_str(scheduled, 32) if scheduled else "",
@@ -1177,7 +1213,9 @@ def normalize_task(raw: dict[str, Any], today: dict[str, int], active: dict[str,
     }
 
 
-def cmd_export(_: argparse.Namespace, extra: dict | None = None) -> int:
+def cmd_export(
+    _: argparse.Namespace, extra: dict | None = None, *, require_task_success: bool = False
+) -> int:
     available = which("task")
     timew_available = which("timew")
     if not available:
@@ -1202,11 +1240,19 @@ def cmd_export(_: argparse.Namespace, extra: dict | None = None) -> int:
     if tw_err:
         return err_json(tw_err, timewAvailable=timew_available)
 
-    raw_tasks, export_err = export_tasks()
+    raw_tasks, export_err = export_tasks(require_success=require_task_success)
     if export_err:
         return err_json(export_err, timewAvailable=timew_available)
 
-    tasks = [normalize_task(t, today, active) for t in raw_tasks]
+    recurrence_by_template = {
+        str(t.get("uuid") or ""): str(t.get("recur") or "")
+        for t in raw_tasks
+        if t.get("status") == "recurring" and t.get("uuid") and t.get("recur")
+    }
+    tasks = [
+        normalize_task(t, today, active, recurrence_by_template)
+        for t in raw_tasks
+    ]
 
     # Resolve dependency graph both ways:
     # - depends: tasks this one waits on
@@ -1282,6 +1328,88 @@ def cmd_export(_: argparse.Namespace, extra: dict | None = None) -> int:
     return ok_json(payload)
 
 
+def alert_state_path() -> Path:
+    return Path.home() / ALERT_STATE_RELATIVE_PATH
+
+
+def load_alert_state(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.stat().st_size > MAX_ALERT_STATE_BYTES:
+            return None
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise
+    try:
+        state = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(state, dict) or state.get("version") != STATE_VERSION:
+        return None
+    return state
+
+
+def save_alert_state(path: Path, state: dict[str, Any]) -> None:
+    encoded = json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > MAX_ALERT_STATE_BYTES:
+        raise OSError("alert state exceeds size limit")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    fd, temporary = tempfile.mkstemp(prefix=".alert-state-", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def cmd_refresh(_: argparse.Namespace) -> int:
+    if not which("task"):
+        return err_json("taskwarrior is unavailable")
+
+    # Reuse the established export contract and normalization without emitting it.
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        result = cmd_export(argparse.Namespace(), require_task_success=True)
+    try:
+        payload = json.loads(captured.getvalue())
+    except json.JSONDecodeError:
+        return err_json("task export returned invalid response")
+    if result != 0 or not payload.get("ok") or not payload.get("available"):
+        return err_json(str(payload.get("error") or "taskwarrior export failed"))
+
+    current_time = datetime.now(timezone.utc)
+    outcome = reconcile(payload.get("tasks", []), None, current_time)
+    try:
+        path = alert_state_path()
+        prior = load_alert_state(path)
+        outcome = reconcile(payload.get("tasks", []), prior, current_time)
+        save_alert_state(path, outcome["state"])
+    except (OSError, ValueError, TypeError) as exc:
+        # Never expose events unless the dedup state has been durably replaced.
+        payload["alertSummary"] = outcome["summary"]
+        payload["notifications"] = []
+        payload["alertStateError"] = str(exc)
+        return ok_json(payload)
+
+    payload["alertSummary"] = outcome["summary"]
+    payload["notifications"] = outcome["notifications"]
+    return ok_json(payload)
+
+
 def build_mods(args: argparse.Namespace) -> list[str]:
     mods: list[str] = []
     if getattr(args, "description", None):
@@ -1346,6 +1474,9 @@ def patch_task_json(uuid: str, fields: dict[str, Any]) -> subprocess.CompletedPr
 def cmd_add(args: argparse.Namespace) -> int:
     if not args.description or not str(args.description).strip():
         return err_json("description is required")
+    recurrence = str(getattr(args, "recur", None) or "").strip()
+    if recurrence and not str(getattr(args, "due", None) or "").strip():
+        return err_json("recurrence requires a due date")
     details = getattr(args, "details", None)
     waiting_for = getattr(args, "waiting_for", None)
     outcome = getattr(args, "outcome", None)
@@ -1363,9 +1494,13 @@ def cmd_add(args: argparse.Namespace) -> int:
     mods = build_mods(tmp)
     desc = mods[0]
     rest = list(mods[1:])
+    if recurrence:
+        rest.append(f"recur:{recurrence}")
     # Default lifecycle: Waiting → In progress → Done.
     # TW models waiting as pending + future wait:.
-    status = str(getattr(args, "status", None) or "waiting").strip().lower()
+    status = str(
+        getattr(args, "status", None) or ("pending" if recurrence else "waiting")
+    ).strip().lower()
     mark_done = status in ("completed", "done")
     if status in ("waiting", "wait"):
         rest.append("wait:tomorrow")
@@ -1383,49 +1518,140 @@ def cmd_add(args: argparse.Namespace) -> int:
     if proc.returncode != 0:
         return mutate_and_export(proc)
 
-    after, after_err = export_tasks()
+    after, after_err = export_tasks(materialize_recurrence=bool(recurrence))
     if after_err:
         return err_json(after_err)
-    new_uuid = ""
-    for t in after:
-        u = str(t.get("uuid") or "")
-        if u and u not in before:
-            new_uuid = u
-            break
+    new_tasks = [
+        task
+        for task in after
+        if str(task.get("uuid") or "")
+        and str(task.get("uuid") or "") not in before
+    ]
 
-    if new_uuid:
+    template_uuid = ""
+    created_task: dict[str, Any] | None = None
+    patch_targets: list[dict[str, Any]] = []
+    if recurrence:
+        template = next(
+            (
+                task
+                for task in new_tasks
+                if task.get("status") == "recurring"
+                and str(task.get("description") or "") == str(args.description)
+            ),
+            None,
+        )
+        if not template:
+            return err_json("failed to identify recurring template")
+        template_uuid = str(template.get("uuid") or "")
+        children = [
+            task
+            for task in new_tasks
+            if str(task.get("parent") or "") == template_uuid
+        ]
+        if not children:
+            return err_json("failed to identify recurring occurrence")
+
+        now = datetime.now(timezone.utc)
+
+        def actionable(task: dict[str, Any]) -> bool:
+            if task.get("status") != "pending":
+                return False
+            wait = parse_iso(str(task.get("wait") or ""))
+            return not wait or ensure_aware(wait) <= now
+
+        created_task = next((task for task in children if actionable(task)), None)
+        if created_task is None:
+            created_task = next(
+                (task for task in children if task.get("status") == "pending"),
+                children[0],
+            )
+        patch_targets = [template, *children]
+    else:
+        # An ordinary add produces one UUID; retain the existing response and
+        # lifecycle behavior for non-recurring tasks.
+        created_task = new_tasks[0] if new_tasks else None
+        if created_task:
+            patch_targets = [created_task]
+
+    created_uuid = str(created_task.get("uuid") or "") if created_task else ""
+    for target in patch_targets:
+        target_uuid = str(target.get("uuid") or "")
+        if not target_uuid:
+            continue
         if details is not None and str(details) != "":
-            patch = patch_task_json(new_uuid, {"details": str(details)})
+            patch = patch_task_json(target_uuid, {"details": str(details)})
             if patch.returncode != 0:
                 return mutate_and_export(patch)
         if waiting_for is not None and str(waiting_for).strip() != "":
-            wf = task_cmd(new_uuid, "modify", f"waitingfor:{waiting_for}")
+            wf = task_cmd(target_uuid, "modify", f"waitingfor:{waiting_for}")
             if wf.returncode != 0:
                 return mutate_and_export(wf)
         if outcome is not None and str(outcome).strip() != "":
-            oc = task_cmd(new_uuid, "modify", f"outcome:{outcome}")
+            oc = task_cmd(target_uuid, "modify", f"outcome:{outcome}")
             if oc.returncode != 0:
                 return mutate_and_export(oc)
         for dep in depends:
-            dep_proc = task_cmd(new_uuid, "modify", f"depends:{dep}")
+            dep_proc = task_cmd(target_uuid, "modify", f"depends:{dep}")
             if dep_proc.returncode != 0:
                 return mutate_and_export(dep_proc)
+
+    if created_uuid:
         if mark_done:
-            done_proc = task_cmd(new_uuid, "done")
+            done_proc = task_cmd(created_uuid, "done")
             if done_proc.returncode != 0:
                 return mutate_and_export(done_proc)
-        elif start_timer:
-            # Start only makes sense for an open task.
-            start_proc = task_cmd(new_uuid, "start")
+        elif start_timer and (not recurrence or actionable(created_task or {})):
+            # Recurrence timers belong to the actionable child, never the template
+            # or a child whose wait date is still in the future.
+            start_proc = task_cmd(created_uuid, "start")
             if start_proc.returncode != 0:
                 return mutate_and_export(start_proc)
 
-    return cmd_export(argparse.Namespace(), extra={"createdUuid": new_uuid} if new_uuid else None)
+    extra: dict[str, Any] = {}
+    if created_uuid:
+        extra["createdUuid"] = created_uuid
+    if template_uuid:
+        extra["templateUuid"] = template_uuid
+    return cmd_export(argparse.Namespace(), extra=extra or None)
 
 
 def cmd_modify(args: argparse.Namespace) -> int:
     if not args.uuid:
         return err_json("uuid is required")
+    requested_recurrence = getattr(args, "recur", None)
+    recurrence_target = ""
+    conversion = False
+    if requested_recurrence is not None:
+        recurrence = str(requested_recurrence).strip()
+        if not recurrence:
+            return err_json("recurrence interval cannot be empty")
+        raw_tasks, export_err = export_tasks()
+        if export_err:
+            return err_json(export_err)
+        by_uuid = {str(task.get("uuid") or ""): task for task in raw_tasks}
+        selected = by_uuid.get(args.uuid)
+        if not selected:
+            return err_json("task not found")
+        if selected.get("status") == "recurring":
+            recurrence_target = args.uuid
+        elif selected.get("parent"):
+            parent_uuid = str(selected.get("parent") or "")
+            parent = by_uuid.get(parent_uuid)
+            if not parent or parent.get("status") != "recurring" or not parent.get("recur"):
+                return err_json("active recurring parent not found")
+            recurrence_target = parent_uuid
+        elif selected.get("status") == "pending":
+            recurrence_target = args.uuid
+            conversion = True
+        else:
+            return err_json("recurrence can only be enabled on a pending task")
+
+        due_after_update = getattr(args, "due", None)
+        due_value = due_after_update if due_after_update is not None else selected.get("due")
+        if not str(due_value or "").strip():
+            return err_json("recurrence requires a due date")
+
     mods: list[str] = []
     if args.description is not None and args.description != "":
         mods.append(f"description:{args.description}")
@@ -1441,7 +1667,7 @@ def cmd_modify(args: argparse.Namespace) -> int:
         details=None,
     )
     mods.extend(build_mods(tmp))
-    if not mods and details is None:
+    if not mods and details is None and requested_recurrence is None:
         return err_json("no modifications")
     if mods:
         proc = task_cmd(args.uuid, "modify", *mods)
@@ -1451,7 +1677,51 @@ def cmd_modify(args: argparse.Namespace) -> int:
         proc = patch_task_json(args.uuid, {"details": str(details)})
         if proc.returncode != 0:
             return mutate_and_export(proc)
+    if requested_recurrence is not None:
+        proc = task_cmd(recurrence_target, "modify", f"recur:{str(requested_recurrence).strip()}")
+        if proc.returncode != 0:
+            return mutate_and_export(proc)
+        if conversion:
+            after, after_err = export_tasks(materialize_recurrence=True)
+            if after_err:
+                return err_json(after_err)
+            template = next(
+                (task for task in after if str(task.get("uuid") or "") == recurrence_target
+                 and task.get("status") == "recurring"),
+                None,
+            )
+            if not template:
+                return err_json("failed to identify recurring template")
+            children = [task for task in after if str(task.get("parent") or "") == recurrence_target]
+            if not children:
+                return err_json("failed to identify recurring occurrence")
+            if details is not None and str(details) != "":
+                for target in (template, *children):
+                    patch = patch_task_json(str(target.get("uuid") or ""), {"details": str(details)})
+                    if patch.returncode != 0:
+                        return mutate_and_export(patch)
     return cmd_export(argparse.Namespace())
+
+
+def cmd_stop_series(args: argparse.Namespace) -> int:
+    if not args.uuid:
+        return err_json("uuid is required")
+    raw_tasks, export_err = export_tasks()
+    if export_err:
+        return err_json(export_err)
+    by_uuid = {str(task.get("uuid") or ""): task for task in raw_tasks}
+    selected = by_uuid.get(args.uuid)
+    if not selected:
+        return err_json("task not found")
+    if selected.get("status") == "recurring" and selected.get("recur"):
+        template_uuid = args.uuid
+    else:
+        parent_uuid = str(selected.get("parent") or "")
+        parent = by_uuid.get(parent_uuid)
+        if not parent or parent.get("status") != "recurring" or not parent.get("recur"):
+            return err_json("active recurring series not found")
+        template_uuid = parent_uuid
+    return mutate_and_export(task_cmd(template_uuid, "delete"))
 
 
 def cmd_done(args: argparse.Namespace) -> int:
@@ -1712,6 +1982,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("export")
+    sub.add_parser("refresh")
 
     p_add = sub.add_parser("add")
     p_add.add_argument("--description", required=True)
@@ -1719,11 +1990,12 @@ def main() -> int:
     p_add.add_argument("--priority", default=None)
     p_add.add_argument("--scheduled", default=None)
     p_add.add_argument("--due", default=None)
+    p_add.add_argument("--recur", default=None)
     p_add.add_argument("--details", default=None)
     p_add.add_argument(
         "--status",
-        default="waiting",
-        help="waiting (default), pending, or completed",
+        default=None,
+        help="waiting (default for ordinary adds), pending, or completed",
     )
     p_add.add_argument("--waiting-for", default=None)
     p_add.add_argument("--outcome", default=None)
@@ -1737,7 +2009,11 @@ def main() -> int:
     p_mod.add_argument("--priority", default=None)
     p_mod.add_argument("--scheduled", default=None)
     p_mod.add_argument("--due", default=None)
+    p_mod.add_argument("--recur", default=None)
     p_mod.add_argument("--details", default=None)
+
+    p_stop_series = sub.add_parser("stop-series")
+    p_stop_series.add_argument("--uuid", required=True)
 
     for name in ("done", "delete", "start", "stop"):
         p = sub.add_parser(name)
@@ -1806,8 +2082,10 @@ def main() -> int:
     args = parser.parse_args()
     handlers = {
         "export": cmd_export,
+        "refresh": cmd_refresh,
         "add": cmd_add,
         "modify": cmd_modify,
+        "stop-series": cmd_stop_series,
         "done": cmd_done,
         "delete": cmd_delete,
         "start": cmd_start,

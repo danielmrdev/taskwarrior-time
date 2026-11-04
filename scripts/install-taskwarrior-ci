@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="3.5.0"
+SHA256="9ea64b411f8314414f440ec765dfdf5a86c9f6159df47e2f60cff3db6b31157a"
+ARCHIVE_URL="https://github.com/GothenburgBitFactory/taskwarrior/releases/download/v${VERSION}/task-${VERSION}.tar.gz"
+PREFIX="${1:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/taskwarrior-${VERSION}}"
+
+for command in cmake curl sha256sum tar; do
+  command -v "$command" >/dev/null 2>&1 || {
+    echo "install-taskwarrior-ci: missing required command: $command" >&2
+    exit 1
+  }
+done
+
+mkdir -p "$PREFIX"
+PREFIX="$(cd "$PREFIX" && pwd -P)"
+WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/taskwarrior-${VERSION}.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+ARCHIVE="$WORK_DIR/task-${VERSION}.tar.gz"
+SOURCE_DIR="$WORK_DIR/task-${VERSION}"
+BUILD_DIR="$WORK_DIR/build"
+
+curl --fail --location --silent --show-error --retry 3 \
+  "$ARCHIVE_URL" --output "$ARCHIVE"
+printf '%s  %s\n' "$SHA256" "$ARCHIVE" | sha256sum --check --status || {
+  echo "install-taskwarrior-ci: Taskwarrior ${VERSION} archive checksum mismatch" >&2
+  exit 1
+}
+
+tar -xzf "$ARCHIVE" --directory "$WORK_DIR"
+[[ -f "$SOURCE_DIR/CMakeLists.txt" ]] || {
+  echo "install-taskwarrior-ci: expected source directory not found in archive" >&2
+  exit 1
+}
+
+cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX"
+cmake --build "$BUILD_DIR" --parallel "$(getconf _NPROCESSORS_ONLN)"
+cmake --install "$BUILD_DIR"
+
+TASK_VERSION="$("$PREFIX/bin/task" --version)"
+[[ "$TASK_VERSION" == "$VERSION" ]] || {
+  echo "install-taskwarrior-ci: expected Taskwarrior ${VERSION}, got ${TASK_VERSION:-<empty>}" >&2
+  exit 1
+}
+printf 'Installed Taskwarrior %s at %s\n' "$TASK_VERSION" "$PREFIX/bin/task"

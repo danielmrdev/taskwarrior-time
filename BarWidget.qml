@@ -56,6 +56,10 @@ BarWidget {
     var overdue = Math.max(0, Number(data.actionable) || 0)
     var pendingCount = Math.max(0, Number(data.pending) || 0)
     var waitingCount = Math.max(0, Number(data.waiting) || 0)
+    var alertSummary = data.alertSummary || {}
+    var overdueAlerts = Math.max(0, Number(alertSummary.overdue) || 0)
+    var upcomingAlerts = Math.max(0, Number(alertSummary.upcoming) || 0)
+    var newRecurrences = Math.max(0, Number(alertSummary.newRecurrences) || 0)
 
     if (overdue > 0)
       lines.push(root.trCount("tooltipOverdue", overdue))
@@ -65,6 +69,12 @@ BarWidget {
       counts.push(root.trCount("tooltipPending", pendingCount))
     if (waitingCount > 0)
       counts.push(root.trCount("tooltipWaiting", waitingCount))
+    if (overdueAlerts > 0)
+      counts.push(root.trCount("tooltipAlertOverdue", overdueAlerts))
+    if (upcomingAlerts > 0)
+      counts.push(root.trCount("tooltipAlertUpcoming", upcomingAlerts))
+    if (newRecurrences > 0)
+      counts.push(root.trCount("tooltipAlertNewRecurrences", newRecurrences))
     if (counts.length)
       lines.push(counts.join(" · "))
 

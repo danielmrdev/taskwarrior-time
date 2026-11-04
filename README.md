@@ -22,7 +22,8 @@ Anything you do here is stored in your normal Taskwarrior / Timewarrior data. Yo
 
 - **Task list** with grouping (project, priority, due, status) and a collapsible advanced filter
 - **Create & edit** in place: title, details, status (Waiting / In progress / Done), waiting-for, outcome, priority, project
-- **Schedule** fields (scheduled / due), **dependencies** (depends / blocks), and **Timewarrior** timers with manual time adjust
+- **Schedule** fields (scheduled / due), **native Taskwarrior recurrence** (create/edit recurring series and stop future occurrences), **dependencies** (depends / blocks), and **Timewarrior** timers with manual time adjust
+- **Persistent desktop alerts** for overdue tasks, tasks due within 24 hours, and newly generated recurring occurrences; critical notifications stay until manually dismissed, with no automatic resend for an unchanged event
 - Progressive **list meta**: project · priority · due (Today / Tomorrow / Overdue) · blocked — colors follow the Omarchy theme
 - **Projects** view: browse projects, rename, clear project from tasks
 - **Unsaved changes** dialog when closing a dirty editor (Save / Keep editing / Discard)
@@ -191,7 +192,7 @@ Please do **not** paste secrets, tokens, or private task content.
 
 ## Development checks
 
-From a clone of this repository (Node.js 22+ and Python 3 required for behavior tests):
+From a clone of this repository (Node.js 22+, Python 3, and Taskwarrior 3.5.0 required for the full isolated behavior checks):
 
 ```bash
 ./scripts/enable-git-hooks   # once per clone — enables pre-push checks

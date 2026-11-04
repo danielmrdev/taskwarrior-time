@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native Taskwarrior recurrence controls for creating/editing series and stopping future occurrences
+- Persistent critical alerts for overdue tasks, tasks due within 24 hours, and newly generated recurring occurrences; dismiss notifications manually
+- Bar tooltip counts for overdue, upcoming, and new recurring tasks
 - IPC action `newTask` opens the Tasks view and focuses the composer for configurable Hyprland keybindings
 - Spanish UI with system-locale detection and manual selection in About
+- Development checks provision and verify Taskwarrior 3.5.0 for isolated helper tests
 
 ## [1.0.2] - 2026-09-29
 
