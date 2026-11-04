@@ -224,7 +224,7 @@ class RecurrenceCliTest(unittest.TestCase):
         self.assertEqual(task["recurrence"], "")
         self.assertEqual(task["parentUuid"], "")
 
-    def test_nonrecurring_helper_add_keeps_single_created_task_response(self):
+    def test_nonrecurring_helper_add_defaults_to_pending(self):
         response = self.run_helper(
             "add",
             "--description",
@@ -238,8 +238,8 @@ class RecurrenceCliTest(unittest.TestCase):
         task = response["tasks"][0]
         self.assertEqual(response["createdUuid"], task["uuid"])
         self.assertEqual(task["description"], "ordinary helper add")
-        self.assertEqual(task["status"], "waiting")
-        self.assertTrue(task["wait"])
+        self.assertEqual(task["status"], "pending")
+        self.assertFalse(task["wait"])
         self.assertEqual(task["details"], "ordinary task notes")
         self.assertFalse(task["isRecurringTemplate"])
         self.assertEqual(task["recurrence"], "")

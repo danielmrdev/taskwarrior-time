@@ -192,7 +192,6 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.pillLabel
-    fontSize: Style.font.caption
     active: root.hasActiveTimer || !root.taskAvailable || root.debugLogging
     activeColor: Color.accent
     useActiveColor: true

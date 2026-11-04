@@ -1496,11 +1496,8 @@ def cmd_add(args: argparse.Namespace) -> int:
     rest = list(mods[1:])
     if recurrence:
         rest.append(f"recur:{recurrence}")
-    # Default lifecycle: Waiting → In progress → Done.
-    # TW models waiting as pending + future wait:.
-    status = str(
-        getattr(args, "status", None) or ("pending" if recurrence else "waiting")
-    ).strip().lower()
+    # New tasks default to pending. Waiting uses pending + future wait:.
+    status = str(getattr(args, "status", None) or "pending").strip().lower()
     mark_done = status in ("completed", "done")
     if status in ("waiting", "wait"):
         rest.append("wait:tomorrow")

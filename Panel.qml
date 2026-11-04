@@ -413,7 +413,7 @@ Panel {
   property string addScheduled: ""
   property string addDue: ""
   property string addRecurrence: ""
-  property string addStatus: "waiting"
+  property string addStatus: "pending"
   property string addWaitingFor: ""
   property var addDepUuids: []
   property bool addStartTimer: false
@@ -1326,7 +1326,7 @@ Panel {
       root.lastError = "scheduled > due"
       return
     }
-    var status = root.addStatus || "waiting"
+    var status = root.addStatus || "pending"
     var args = ["add", "--description", desc, "--status", status]
     if (priorityCombo.value) args.push("--priority", priorityCombo.value)
     if (projectCombo.value) args.push("--project", projectCombo.value)
@@ -1355,7 +1355,7 @@ Panel {
     addOutcomeField.text = ""
     priorityCombo.value = ""
     projectCombo.value = ""
-    root.addStatus = "waiting"
+    root.addStatus = "pending"
     root.addDepUuids = []
     root.addStartTimer = false
     root.showAddAdvanced = false
@@ -2692,7 +2692,11 @@ Panel {
                           width: parent.width
                           text: {
                             var _ = root.dataRev
-                            return rowRoot.task ? rowRoot.task.description : ""
+                            if (!rowRoot.task) return ""
+                            var recurring = rowRoot.task.isRecurringTemplate
+                              || !!rowRoot.task.recurrence || !!rowRoot.task.parentUuid
+                            var description = String(rowRoot.task.description || "")
+                            return (recurring ? "\uf021 " : "") + description
                           }
                           color: {
                             if (rowRoot.task && rowRoot.task.status === "completed")
@@ -3735,16 +3739,6 @@ Panel {
             Row {
               spacing: Style.space(4)
               Button {
-                text: root.tr("waiting")
-                selected: root.addStatus === "waiting"
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                verticalPadding: Style.space(1)
-                horizontalPadding: Style.space(6)
-                onClicked: root.addStatus = "waiting"
-              }
-              Button {
                 text: root.tr("pending")
                 selected: root.addStatus === "pending"
                 foreground: root.foreground
@@ -3753,6 +3747,16 @@ Panel {
                 verticalPadding: Style.space(1)
                 horizontalPadding: Style.space(6)
                 onClicked: root.addStatus = "pending"
+              }
+              Button {
+                text: root.tr("waiting")
+                selected: root.addStatus === "waiting"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                verticalPadding: Style.space(1)
+                horizontalPadding: Style.space(6)
+                onClicked: root.addStatus = "waiting"
               }
               Button {
                 text: root.tr("done")

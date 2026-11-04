@@ -21,7 +21,7 @@ Anything you do here is stored in your normal Taskwarrior / Timewarrior data. Yo
 ## Features
 
 - **Task list** with grouping (project, priority, due, status) and a collapsible advanced filter
-- **Create & edit** in place: title, details, status (Waiting / In progress / Done), waiting-for, outcome, priority, project
+- **Create & edit** in place: title, details, status (Pending / Waiting / Done; Pending default), waiting-for, outcome, priority, project
 - **Schedule** fields (scheduled / due), **native Taskwarrior recurrence** (create/edit recurring series and stop future occurrences), **dependencies** (depends / blocks), and **Timewarrior** timers with manual time adjust
 - **Persistent desktop alerts** for overdue tasks, tasks due within 24 hours, and newly generated recurring occurrences; critical notifications stay until manually dismissed, with no automatic resend for an unchanged event
 - Progressive **list meta**: project · priority · due (Today / Tomorrow / Overdue) · blocked — colors follow the Omarchy theme

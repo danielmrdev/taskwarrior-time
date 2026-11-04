@@ -267,9 +267,9 @@ function priorityOrder(key) {
   return order[key] !== undefined ? order[key] : 9
 }
 
-// Waiting → in progress → done (matches the editor chip order).
+// Pending → waiting → recurring → done.
 function statusGroupOrder(key) {
-  var order = { waiting: 0, pending: 1, recurring: 2, completed: 3 }
+  var order = { pending: 0, waiting: 1, recurring: 2, completed: 3 }
   return order[key] !== undefined ? order[key] : 9
 }
 
